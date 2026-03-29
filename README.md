@@ -9,7 +9,7 @@ Telegram-бот для ответов на вопросы абитуриенто
         │
         ▼
    [Bot service]          aiogram, polling
-        │ HTTP POST /ask
+        │ HTTP POST /ask {text, user_id}
         ▼
   [FastAPI service]       Python + Uvicorn
         │
@@ -26,6 +26,10 @@ Telegram-бот для ответов на вопросы абитуриенто
 LLM отвечает    Векторный поиск     LLM извлекает
 на приветствие  в Milvus → LLM      фильтр → SQL
                 формирует ответ     → LLM форматирует
+        │                   │                   │
+        └───────────┬───────┘───────────────────┘
+                    ▼
+              [Redis] ← история диалога по user_id
 ```
 
 ## Применение LLM
@@ -44,6 +48,7 @@ LLM отвечает    Векторный поиск     LLM извлекает
 - **Эмбеддинги** — модель `paraphrase-multilingual-mpnet-base-v2` (768 измерений) из `sentence-transformers` для векторизации FAQ и терминов.
 - **Семантический поиск** — векторная БД Milvus хранит две коллекции: `faq` и `terms`; при запросе ищутся ближайшие векторы.
 - **Фильтрация нецензурной лексики** — токенизация текста и сверка со словарями русских стоп-слов.
+- **История диалога** — Redis хранит последние сообщения каждого пользователя (по `user_id`). История подставляется в контекст LLM при генерации ответа, что позволяет боту учитывать предыдущие вопросы в разговоре. TTL — 24 часа, лимит — 10 пар сообщений.
 
 ## Стек технологий
 
@@ -55,6 +60,7 @@ LLM отвечает    Векторный поиск     LLM извлекает
 | Эмбеддинги | sentence-transformers |
 | Векторная БД | Milvus 2.4 |
 | Реляционная БД | PostgreSQL 16 |
+| Кэш / история | Redis 7 |
 | ORM | SQLAlchemy |
 | Инфраструктура | Docker, Docker Compose |
 
@@ -74,6 +80,7 @@ PickMe_Ranepa/
 │   │   ├── llm_service.py       # Groq API
 │   │   ├── faq_service.py       # Поиск по Milvus
 │   │   ├── sql_service.py       # SQL-запросы
+│   │   ├── chat_history.py      # История диалогов (Redis)
 │   │   └── preprocess.py        # Фильтрация нецензурной лексики
 │   └── db/
 │       ├── session.py
@@ -120,7 +127,7 @@ XAI_API_KEY=<ключ с console.x.ai>
 docker compose up -d --build
 ```
 
-Запустятся: PostgreSQL, Milvus (+ etcd, MinIO), FastAPI, бот.
+Запустятся: PostgreSQL, Redis, Milvus (+ etcd, MinIO), FastAPI, бот.
 
 ### 3. Загрузка данных (первый запуск)
 

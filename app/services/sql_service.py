@@ -63,9 +63,8 @@ def _extract_filter(question: str) -> tuple[str | None, str | None]:
         col = None
         val = None
     logger.info(
-        "sql.filter extracted=%s elapsed_ms=%.1f",
-        bool(col and val),
-        (time.perf_counter() - t0) * 1000,
+        "[SQL] фильтр: col=%s val=%s | %.0f ms",
+        col, val, (time.perf_counter() - t0) * 1000,
     )
     return col, val
 
@@ -93,13 +92,17 @@ def query_programs(question: str) -> str:
 
     with SessionLocal() as db:
         if col and val:
-            stmt = text(_FILTER_QUERY.format(col=col))
+            query = _FILTER_QUERY.format(col=col)
+            params = {"val": f"%{val}%"}
+            logger.info("[SQL] запрос: %s | params=%s", query, params)
+            stmt = text(query)
             t_db = time.perf_counter()
-            rows = db.execute(stmt, {"val": f"%{val}%"}).mappings().all()
+            rows = db.execute(stmt, params).mappings().all()
         else:
+            logger.info("[SQL] запрос: %s", _BASE_QUERY)
             t_db = time.perf_counter()
             rows = db.execute(text(_BASE_QUERY)).mappings().all()
-        logger.info("sql.query elapsed_ms=%.1f rows=%d", (time.perf_counter() - t_db) * 1000, len(rows))
+        logger.info("[SQL] результат: %d строк | %.0f ms", len(rows), (time.perf_counter() - t_db) * 1000)
 
     rows_text = _rows_to_text([dict(r) for r in rows])
 
@@ -114,5 +117,5 @@ def query_programs(question: str) -> str:
     answer = llm_service.chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
     )
-    logger.info("sql.answer elapsed_ms=%.1f", (time.perf_counter() - t0) * 1000)
+    logger.info("[SQL] LLM-ответ сформирован | %.0f ms", (time.perf_counter() - t0) * 1000)
     return answer

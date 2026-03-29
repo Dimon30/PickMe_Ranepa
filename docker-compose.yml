@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -75,6 +73,32 @@ services:
       retries: 10
       start_period: 30s
 
+  redis:
+    image: redis:7-alpine
+    container_name: pickme_redis
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    container_name: pickme_bot
+    env_file:
+      - .env
+    depends_on:
+      - fastapi
+    restart: unless-stopped
+
   fastapi:
     build:
       context: .
@@ -89,17 +113,8 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
-    restart: unless-stopped
-
-  bot:
-    build:
-      context: .
-      dockerfile: bot/Dockerfile
-    container_name: pickme_bot
-    env_file:
-      - .env
-    depends_on:
-      - fastapi
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
@@ -107,3 +122,4 @@ volumes:
   etcd_data:
   minio_data:
   milvus_data:
+  redis_data:

@@ -1,4 +1,4 @@
-﻿fastapi
+fastapi
 uvicorn[standard]
 pydantic
 aiogram
@@ -11,5 +11,6 @@ pymilvus
 sentence-transformers
 openpyxl
 groq
+redis
 anyio
 telethon

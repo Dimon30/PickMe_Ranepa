@@ -35,10 +35,10 @@ def chat(
     if response_format:
         kwargs["response_format"] = response_format
 
-    logger.info("llm.chat_start model=%s", kwargs["model"])
+    logger.info("[LLM] запрос model=%s", kwargs["model"])
     resp = _get_client().chat.completions.create(**kwargs)
     content = resp.choices[0].message.content or ""
-    logger.info("llm.chat_ok model=%s elapsed_ms=%.1f", kwargs["model"], (time.perf_counter() - t0) * 1000)
+    logger.info("[LLM] ответ model=%s | %.0f ms", kwargs["model"], (time.perf_counter() - t0) * 1000)
     return content
 
 

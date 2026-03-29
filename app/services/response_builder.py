@@ -5,7 +5,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-from app.services import faq_service, llm_service, router, sql_service
+from app.services import chat_history, faq_service, llm_service, router, sql_service
 from app.services.preprocess import contains_profanity
 
 # ─── Шаблоны ──────────────────────────────────────────────────────────────────
@@ -30,23 +30,30 @@ NO_ANSWER_RESPONSE = (
 
 # ─── Пайплайн ─────────────────────────────────────────────────────────────────
 
-def build_rag_answer(question: str) -> str:
+def build_rag_answer(question: str, user_id: int | None = None) -> str:
     t0 = time.perf_counter()
+    logger.info("[RAG] поиск по базе знаний...")
     chunks = faq_service.search_all(question)
     if not chunks:
-        logger.info("rag.no_chunks elapsed_ms=%.1f", (time.perf_counter() - t0) * 1000)
+        logger.info("[RAG] чанков не найдено | %.0f ms", (time.perf_counter() - t0) * 1000)
         return NO_ANSWER_RESPONSE
 
     context_parts = []
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks, 1):
+        score = chunk.get("score", "?")
         if "question" in chunk and "answer" in chunk:
+            logger.info("[RAG] #%d (score=%.3f) FAQ question=%r → answer=%r", i, score, chunk["question"][:120], chunk["answer"][:120])
             context_parts.append(f"Вопрос: {chunk['question']}\nОтвет: {chunk['answer']}")
         elif "header" in chunk and "text" in chunk:
-            context_parts.append(f"{chunk['header']}: {chunk['text']}")
+            logger.info("[RAG] #%d (score=%.3f) TERM header=%r → text=%r", i, score, chunk["header"][:120], chunk["text"][:120])
+            context_parts.append(f"{chunk['header']}\n{chunk['text']}")
     context = "\n\n".join(context_parts)
 
+    history = chat_history.get_history(user_id)
+    logger.info("[RAG] найдено чанков: %d, история: %d сообщений, генерация ответа...", len(chunks), len(history))
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
+        *history,
         {
             "role": "user",
             "content": (
@@ -57,43 +64,53 @@ def build_rag_answer(question: str) -> str:
         },
     ]
     answer = llm_service.chat(messages)
-    logger.info("rag.ok elapsed_ms=%.1f chunks=%d", (time.perf_counter() - t0) * 1000, len(chunks))
+    chat_history.save_exchange(user_id, question, answer)
+    logger.info("[RAG] ответ готов | %.0f ms", (time.perf_counter() - t0) * 1000)
     return answer
 
 
-def build_chitchat_answer(question: str) -> str:
+def build_chitchat_answer(question: str, user_id: int | None = None) -> str:
     t0 = time.perf_counter()
+    history = chat_history.get_history(user_id)
+    logger.info("[CHITCHAT] генерация ответа... история: %d сообщений", len(history))
     messages = [
         {"role": "system", "content": CHITCHAT_PROMPT},
+        *history,
         {"role": "user", "content": question},
     ]
     answer = llm_service.chat(messages)
-    logger.info("chitchat.ok elapsed_ms=%.1f", (time.perf_counter() - t0) * 1000)
+    chat_history.save_exchange(user_id, question, answer)
+    logger.info("[CHITCHAT] ответ готов | %.0f ms", (time.perf_counter() - t0) * 1000)
     return answer
 
 
-def get_answer(question: str) -> str:
+def build_sql_answer(question: str, user_id: int | None = None) -> str:
+    t0 = time.perf_counter()
+    logger.info("[SQL] запрос к базе программ...")
+    answer = sql_service.query_programs(question)
+    chat_history.save_exchange(user_id, question, answer)
+    logger.info("[SQL] ответ готов | %.0f ms", (time.perf_counter() - t0) * 1000)
+    return answer
+
+
+def get_answer(question: str, user_id: int | None = None) -> str:
     """Основной пайплайн: цензура → роутер → обработчик → ответ."""
     t0 = time.perf_counter()
-    logger.info("Got question: %s", question)
+    logger.info(">>> Новый вопрос (user_id=%s): %s", user_id, question)
+
     if contains_profanity(question):
-        logger.info("pipeline.profanity elapsed_ms=%.1f", (time.perf_counter() - t0) * 1000)
+        logger.info("<<< Отклонён (profanity) | %.0f ms", (time.perf_counter() - t0) * 1000)
         return PROFANITY_RESPONSE
 
-    t_intent = time.perf_counter()
     intent = router.classify(question)
-    logger.info(
-        "pipeline.intent intent=%s elapsed_ms=%.1f",
-        intent,
-        (time.perf_counter() - t_intent) * 1000,
-    )
+    logger.info("--- Роутер → %s", intent.upper())
 
     if intent == "chitchat":
-        answer = build_chitchat_answer(question)
+        answer = build_chitchat_answer(question, user_id)
     elif intent == "sql":
-        answer = sql_service.query_programs(question)
+        answer = build_sql_answer(question, user_id)
     else:
-        answer = build_rag_answer(question)
+        answer = build_rag_answer(question, user_id)
 
-    logger.info("pipeline.total elapsed_ms=%.1f", (time.perf_counter() - t0) * 1000)
+    logger.info("<<< Ответ отправлен [%s] | %.0f ms", intent.upper(), (time.perf_counter() - t0) * 1000)
     return answer

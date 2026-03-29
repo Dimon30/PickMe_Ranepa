@@ -182,9 +182,9 @@ def ingest_faq(model: SentenceTransformer, client: MilvusClient):
 
     data = [
         {
-            "question": q[:65000],
-            "answer": a[:65000],
-            "question_type": t[:1000],
+            "question": q,
+            "answer": a,
+            "question_type": t,
             "question_vector": qv,
             "answer_vector": av,
         }
@@ -223,8 +223,8 @@ def ingest_terms(model: SentenceTransformer, client: MilvusClient):
 
     data = [
         {
-            "header": h[:65000],
-            "text": t[:65000],
+            "header": h,
+            "text": t,
             "header_vector": hv,
             "text_vector": tv,
         }
