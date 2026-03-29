@@ -10,7 +10,7 @@ openai
 pymilvus
 sentence-transformers
 openpyxl
-groq
+requests
 redis
 anyio
 telethon
