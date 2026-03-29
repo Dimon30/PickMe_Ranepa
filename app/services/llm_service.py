@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 _DEFAULT_MODEL = "openai/gpt-4o-mini"
-_TIMEOUT_SECONDS = 30
+_TIMEOUT_SECONDS = 120
+
+
+class LLMServiceError(Exception):
+    pass
 
 
 def chat(
@@ -32,7 +36,8 @@ def chat(
 
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        raise Exception("OPENROUTER_API_KEY is not set")
+        logger.error("[LLM] OPENROUTER_API_KEY is not set")
+        raise LLMServiceError("OPENROUTER_API_KEY is not set")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -40,10 +45,18 @@ def chat(
     }
 
     logger.info("[LLM] request model=%s", payload["model"])
-    resp = requests.post(_OPENROUTER_URL, headers=headers, json=payload, timeout=_TIMEOUT_SECONDS)
+    try:
+        resp = requests.post(_OPENROUTER_URL, headers=headers, json=payload, timeout=_TIMEOUT_SECONDS)
+    except requests.exceptions.ReadTimeout as exc:
+        logger.error("[LLM] read timeout after %ss: %s", _TIMEOUT_SECONDS, exc)
+        raise LLMServiceError("OpenRouter read timeout") from exc
+    except requests.exceptions.RequestException as exc:
+        logger.error("[LLM] request error: %s", exc)
+        raise LLMServiceError("OpenRouter request error") from exc
+
     if resp.status_code != 200:
         logger.error("[LLM] error status=%s body=%s", resp.status_code, resp.text)
-        raise Exception(f"OpenRouter API error: status={resp.status_code}")
+        raise LLMServiceError(f"OpenRouter API error: status={resp.status_code}")
 
     data = resp.json()
     content = data["choices"][0]["message"]["content"] or ""

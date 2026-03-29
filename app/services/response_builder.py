@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 from app.services import chat_history, faq_service, llm_service, router, sql_service
 from app.services.preprocess import contains_profanity
 
-# ─── Шаблоны ──────────────────────────────────────────────────────────────────
+# ── Шаблоны ───────────────────────────────────────────────────────────────────
 
 PROFANITY_RESPONSE = (
     "Извините, я не могу ответить на такой запрос. "
@@ -28,7 +28,15 @@ NO_ANSWER_RESPONSE = (
     "Вы можете обратиться в приёмную комиссию РАНХиГС напрямую."
 )
 
-# ─── Пайплайн ─────────────────────────────────────────────────────────────────
+CHITCHAT_FALLBACK_RESPONSE = (
+    "Извините, сервис генерации временно недоступен. "
+    "Могу помочь с вопросами о поступлении."
+)
+
+RAG_FALLBACK_RESPONSE = "Сервис генерации временно недоступен."
+
+# ── Пайплайн ──────────────────────────────────────────────────────────────────
+
 
 def build_rag_answer(question: str, user_id: int | None = None) -> str:
     t0 = time.perf_counter()
@@ -42,15 +50,31 @@ def build_rag_answer(question: str, user_id: int | None = None) -> str:
     for i, chunk in enumerate(chunks, 1):
         score = chunk.get("score", "?")
         if "question" in chunk and "answer" in chunk:
-            logger.info("[RAG] #%d (score=%.3f) FAQ question=%r → answer=%r", i, score, chunk["question"][:120], chunk["answer"][:120])
+            logger.info(
+                "[RAG] #%d (score=%.3f) FAQ question=%r → answer=%r",
+                i,
+                score,
+                chunk["question"][:120],
+                chunk["answer"][:120],
+            )
             context_parts.append(f"Вопрос: {chunk['question']}\nОтвет: {chunk['answer']}")
         elif "header" in chunk and "text" in chunk:
-            logger.info("[RAG] #%d (score=%.3f) TERM header=%r → text=%r", i, score, chunk["header"][:120], chunk["text"][:120])
+            logger.info(
+                "[RAG] #%d (score=%.3f) TERM header=%r → text=%r",
+                i,
+                score,
+                chunk["header"][:120],
+                chunk["text"][:120],
+            )
             context_parts.append(f"{chunk['header']}\n{chunk['text']}")
     context = "\n\n".join(context_parts)
 
     history = chat_history.get_history(user_id)
-    logger.info("[RAG] найдено чанков: %d, история: %d сообщений, генерация ответа...", len(chunks), len(history))
+    logger.info(
+        "[RAG] найдено чанков: %d, история: %d сообщений, генерация ответа...",
+        len(chunks),
+        len(history),
+    )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         *history,
@@ -63,7 +87,15 @@ def build_rag_answer(question: str, user_id: int | None = None) -> str:
             ),
         },
     ]
-    answer = llm_service.chat(messages)
+    try:
+        answer = llm_service.chat(messages)
+    except llm_service.LLMServiceError as exc:
+        logger.error("[RAG] LLM unavailable: %s", exc)
+        return context if context.strip() else RAG_FALLBACK_RESPONSE
+    except Exception as exc:
+        logger.exception("[RAG] unexpected LLM error: %s", exc)
+        return context if context.strip() else RAG_FALLBACK_RESPONSE
+
     chat_history.save_exchange(user_id, question, answer)
     logger.info("[RAG] ответ готов | %.0f ms", (time.perf_counter() - t0) * 1000)
     return answer
@@ -78,7 +110,15 @@ def build_chitchat_answer(question: str, user_id: int | None = None) -> str:
         *history,
         {"role": "user", "content": question},
     ]
-    answer = llm_service.chat(messages)
+    try:
+        answer = llm_service.chat(messages)
+    except llm_service.LLMServiceError as exc:
+        logger.error("[CHITCHAT] LLM unavailable: %s", exc)
+        return CHITCHAT_FALLBACK_RESPONSE
+    except Exception as exc:
+        logger.exception("[CHITCHAT] unexpected LLM error: %s", exc)
+        return CHITCHAT_FALLBACK_RESPONSE
+
     chat_history.save_exchange(user_id, question, answer)
     logger.info("[CHITCHAT] ответ готов | %.0f ms", (time.perf_counter() - t0) * 1000)
     return answer

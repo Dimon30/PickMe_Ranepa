@@ -1,20 +1,20 @@
 sudo docker compose exec fastapi sh -lc 'python - <<PY
-import requests
+import os, requests
 
-API_KEY = "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"
-url = "https://openrouter.ai/api/v1/chat/completions"
+key = "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"
+resp = requests.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    headers={
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "model": "openai/gpt-4o-mini",
+        "messages": [{"role": "user", "content": "Привет"}]
+    },
+    timeout=30
+)
 
-headers = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json",
-}
-
-data = {
-    "model": "openai/gpt-4o-mini",
-    "messages": [{"role": "user", "content": "Привет"}]
-}
-
-resp = requests.post(url, headers=headers, json=data, timeout=30)
 print("STATUS:", resp.status_code)
 print(resp.text)
 PY'

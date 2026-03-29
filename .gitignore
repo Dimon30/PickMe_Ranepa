@@ -6,3 +6,4 @@ session_name.session
 session_name.session-journal
 .env
 .env.local
+temp.txt
