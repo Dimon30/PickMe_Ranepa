@@ -24,6 +24,8 @@ except Exception:  # pragma: no cover
     TfidfVectorizer = None
     sklearn_cosine_similarity = None
 
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / 'stats' / 'results'
 PLOTS_DIR = ROOT / 'stats' / 'plots'
@@ -124,6 +126,8 @@ class DatasetSpec:
 
 def detect_dataset(path: str | Path) -> DatasetSpec:
     path = Path(path)
+    if not path.exists():
+        path = DATA_DIR / path
     df = pd.read_excel(path)
     cols = set(df.columns)
     if {'Вопрос', 'Ответ'}.issubset(cols):

@@ -7,3 +7,5 @@ session_name.session-journal
 .env
 .env.local
 temp.txt
+*.zip
+*.7z
