@@ -5,7 +5,7 @@ import os
 import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from dotenv import load_dotenv
 
 ENV_FILE = os.getenv("ENV_FILE", ".env")
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_URL = os.getenv("FASTAPI_URL", "http://fastapi:8000")
 
-ADMINS = [1746548188, 951040100]  # твой id сюда
+ADMINS = {1746548188, 951040100}
 
 WELCOME_MESSAGE = (
     "Здравствуйте! 👋.\n"
@@ -54,17 +54,26 @@ async def _keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event) -> Non
         await asyncio.sleep(4)
 
 
-@dp.message_handler(commands=['add_admin'])
-async def add_admin(message: types.Message):
+@dp.message(Command("add_admin"))
+async def add_admin(message: Message):
     if message.from_user.id not in ADMINS:
-        return await message.reply("Нет доступа")
+        await message.answer("Нет доступа")
+        return
+
+    parts = message.text.split()
+
+    if len(parts) != 2:
+        await message.answer("Использование: /add_admin USER_ID")
+        return
 
     try:
-        new_admin_id = int(message.text.split()[1])
-        ADMINS.append(new_admin_id)
-        await message.reply(f"Админ {new_admin_id} добавлен")
-    except:
-        await message.reply("Используй: /add_admin USER_ID")
+        new_admin_id = int(parts[1])
+    except ValueError:
+        await message.answer("USER_ID должен быть числом")
+        return
+
+    ADMINS.add(new_admin_id)
+    await message.answer(f"Админ {new_admin_id} добавлен")
 
 @dp.message(F.text)
 async def text_handler(message: Message):
