@@ -18,9 +18,11 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_URL = os.getenv("FASTAPI_URL", "http://fastapi:8000")
 
+ADMINS = [1746548188, 951040100]  # твой id сюда
+
 WELCOME_MESSAGE = (
     "Здравствуйте! 👋.\n"
-    "Меня зовут Мария, я Ваша ассистентка-помощница в приёмной комиссии РАНХиГС.\n\n"
+    "Меня зовут АкаДемка, я Ваша ассистентка-помощница в приёмной комиссии РАНХиГС.\n\n"
     "Помогу разобраться с вопросами о поступлении:\n"
     "• проходные баллы и места\n"
     "• образовательные программы\n"
@@ -51,6 +53,18 @@ async def _keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event) -> Non
             pass
         await asyncio.sleep(4)
 
+
+@dp.message_handler(commands=['add_admin'])
+async def add_admin(message: types.Message):
+    if message.from_user.id not in ADMINS:
+        return await message.reply("Нет доступа")
+
+    try:
+        new_admin_id = int(message.text.split()[1])
+        ADMINS.append(new_admin_id)
+        await message.reply(f"Админ {new_admin_id} добавлен")
+    except:
+        await message.reply("Используй: /add_admin USER_ID")
 
 @dp.message(F.text)
 async def text_handler(message: Message):
