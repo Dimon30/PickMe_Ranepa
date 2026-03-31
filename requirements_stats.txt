@@ -1,0 +1,7 @@
+pandas
+matplotlib
+scikit-learn
+rapidfuzz
+requests
+sentence-transformers
+openpyxl
