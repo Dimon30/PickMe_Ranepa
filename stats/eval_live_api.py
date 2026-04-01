@@ -22,38 +22,91 @@ from stats.common import (
 )
 
 
-def evaluate_dataset(spec: DatasetSpec, api_url: str, user_id_base: int, timeout_s: int = 120) -> tuple[pd.DataFrame, dict]:
+def evaluate_dataset(
+    spec: DatasetSpec,
+    api_url: str,
+    user_id_base: int,
+    timeout_s: int = 120
+) -> tuple[pd.DataFrame, dict]:
     rows = expand_eval_rows(spec, include_paraphrases=True)
     out = []
+
     for i, row in rows.iterrows():
-        payload = {'text': str(row['question']), 'user_id': user_id_base + i}
+        question = str(row["question"])
+        gold = str(row["gold_answer"])
+        payload = {
+            "text": question,
+            "user_id": user_id_base + i,
+        }
+
         t0 = time.perf_counter()
-        resp = requests.post(api_url, json=payload, timeout=timeout_s)
-        latency_ms = (time.perf_counter() - t0) * 1000
-        resp.raise_for_status()
-        pred = resp.json().get('answer', '')
-        gold = str(row['gold_answer'])
+
+        pred = ""
+        error = ""
+        status_code = None
+
+        try:
+            resp = requests.post(api_url, json=payload, timeout=timeout_s)
+            latency_ms = (time.perf_counter() - t0) * 1000
+            status_code = resp.status_code
+            resp.raise_for_status()
+
+            data = resp.json()
+            pred = str(data.get("answer", "") or "")
+
+        except Exception as e:
+            latency_ms = (time.perf_counter() - t0) * 1000
+            error = str(e)
+
+        ok = int(error == "")
+
         out.append({
             **row.to_dict(),
-            'pred_answer': pred,
-            'latency_ms': round(latency_ms, 1),
-            'exact_match': exact_match(pred, gold),
-            'f1': token_f1(pred, gold),
-            'cosine_similarity': semantic_cosine(pred, gold),
-            'pred_len': len(str(pred)),
-            'gold_len': len(gold),
+            "pred_answer": pred,
+            "error": error,
+            "ok": ok,
+            "status_code": status_code,
+            "latency_ms": round(latency_ms, 1),
+            "exact_match": exact_match(pred, gold) if pred else 0.0,
+            "f1": token_f1(pred, gold) if pred else 0.0,
+            "cosine_similarity": semantic_cosine(pred, gold) if pred else 0.0,
+            "pred_len": len(pred),
+            "gold_len": len(gold),
         })
+
     df = pd.DataFrame(out)
+
+    success_df = df[df["ok"] == 1].copy()
+
+    if len(success_df) > 0:
+        exact_match_mean = float(success_df["exact_match"].mean())
+        f1_mean = float(success_df["f1"].mean())
+        cosine_similarity_mean = float(success_df["cosine_similarity"].mean())
+        latency_ms_mean = float(success_df["latency_ms"].mean())
+        latency_ms_p50 = float(percentile(success_df["latency_ms"], 0.50))
+        latency_ms_p95 = float(percentile(success_df["latency_ms"], 0.95))
+    else:
+        exact_match_mean = 0.0
+        f1_mean = 0.0
+        cosine_similarity_mean = 0.0
+        latency_ms_mean = 0.0
+        latency_ms_p50 = 0.0
+        latency_ms_p95 = 0.0
+
     summary = {
-        'dataset': spec.name,
-        'rows': int(len(df)),
-        'exact_match_mean': float(df['exact_match'].mean()),
-        'f1_mean': float(df['f1'].mean()),
-        'cosine_similarity_mean': float(df['cosine_similarity'].mean()),
-        'latency_ms_mean': float(df['latency_ms'].mean()),
-        'latency_ms_p50': float(percentile(df['latency_ms'], 0.50)),
-        'latency_ms_p95': float(percentile(df['latency_ms'], 0.95)),
+        "dataset": spec.name,
+        "rows_total": int(len(df)),
+        "rows_success": int(len(success_df)),
+        "rows_failed": int(len(df) - len(success_df)),
+        "success_rate": float(len(success_df) / len(df)) if len(df) else 0.0,
+        "exact_match_mean": exact_match_mean,
+        "f1_mean": f1_mean,
+        "cosine_similarity_mean": cosine_similarity_mean,
+        "latency_ms_mean": latency_ms_mean,
+        "latency_ms_p50": latency_ms_p50,
+        "latency_ms_p95": latency_ms_p95,
     }
+
     return df, summary
 
 

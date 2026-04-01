@@ -83,26 +83,77 @@ def _rows_to_text(rows: list[dict]) -> str:
 
 
 def query_programs(question: str) -> str:
-    """
-    Выполняет параметризованный SQL-запрос к таблице programs на основе вопроса.
-    Возвращает текстовый ответ, сформированный LLM.
-    """
     t0 = time.perf_counter()
     col, val = _extract_filter(question)
+    question_l = question.lower()
+
+    numeric_columns = {"pass_2024", "cost", "budget_places", "paid_places"}
 
     with SessionLocal() as db:
+        # --- если есть фильтр ---
         if col and val:
-            query = _FILTER_QUERY.format(col=col)
-            params = {"val": f"%{val}%"}
-            logger.info("[SQL] запрос: %s | params=%s", query, params)
-            stmt = text(query)
-            t_db = time.perf_counter()
-            rows = db.execute(stmt, params).mappings().all()
+
+            # --- числовые поля ---
+            if col in numeric_columns:
+                try:
+                    num_val = float(str(val).replace(",", "."))
+                except ValueError:
+                    logger.warning(
+                        "[SQL] не удалось преобразовать число: col=%s val=%s",
+                        col, val
+                    )
+                    return "Не удалось корректно распознать числовое значение."
+
+                # спец логика для проходных баллов
+                if col == "pass_2024" and (
+                    "набрал" in question_l
+                    or "на что могу рассчитывать" in question_l
+                    or "с таким баллом" in question_l
+                    or "куда могу пройти" in question_l
+                ):
+                    query = """
+                        SELECT * FROM programs
+                        WHERE pass_2024 <= :val
+                        ORDER BY pass_2024 DESC
+                    """
+                    params = {"val": num_val}
+
+                else:
+                    ALLOWED_COLUMNS = {
+                        "program",
+                        "faculty",
+                        "pass_2024",
+                        "cost",
+                        "budget_places",
+                        "paid_places",
+                    }
+
+                    if col not in ALLOWED_COLUMNS:
+                        return "Некорректный параметр запроса."
+                    query = f"SELECT * FROM programs WHERE {col} = :val"
+                    params = {"val": num_val}
+
+            # --- текстовые поля ---
+            else:
+                query = _FILTER_QUERY.format(col=col)
+                params = {"val": f"%{val}%"}
+
+        # --- без фильтра ---
         else:
-            logger.info("[SQL] запрос: %s", _BASE_QUERY)
-            t_db = time.perf_counter()
-            rows = db.execute(text(_BASE_QUERY)).mappings().all()
-        logger.info("[SQL] результат: %d строк | %.0f ms", len(rows), (time.perf_counter() - t_db) * 1000)
+            query = _BASE_QUERY
+            params = {}
+
+        logger.info("[SQL] запрос: %s | params=%s", query, params)
+
+        stmt = text(query)
+        t_db = time.perf_counter()
+        rows = db.execute(stmt, params).mappings().all()
+
+        logger.info(
+            "[SQL] результат: %d строк | %.0f ms",
+            len(rows),
+            (time.perf_counter() - t_db) * 1000,
+        )
 
     rows_text = _rows_to_text([dict(r) for r in rows])
 
@@ -113,9 +164,14 @@ def query_programs(question: str) -> str:
         "Ты — помощник приёмной комиссии РАНХиГС. "
         "Отвечай кратко, точно и по существу на основе данных из таблицы."
     )
+
     user_msg = f"Вопрос: {question}\n\nДанные из базы:\n{rows_text}"
-    answer = llm_service.chat(
-        [{"role": "system", "content": system}, {"role": "user", "content": user_msg}]
-    )
+
+    answer = llm_service.chat([
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_msg}
+    ])
+
     logger.info("[SQL] LLM-ответ сформирован | %.0f ms", (time.perf_counter() - t0) * 1000)
+
     return answer
